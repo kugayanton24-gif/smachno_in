@@ -23,29 +23,25 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 
-# ================== ENV ==================
+# ================= ENV =================
 TOKEN = os.getenv("TOKEN")
 SHEET_ID = os.getenv("SHEET_ID")
 GOOGLE_CREDS_JSON = os.getenv("GOOGLE_CREDS_JSON")
 
+ADMIN_ID = 890221392
 UA_TZ = ZoneInfo("Europe/Kyiv")
 
 
-# ================== ADMIN ==================
-ADMIN_ID = 890221392
-BTN_ADMIN = "📨 Розсилка афіші"
-
-
-# ================== UI ==================
+# ================= UI =================
 BTN_CONTACT = "📲 Поділитися контактом"
 BTN_LOYALTY = "💳 Система лояльності"
+BTN_ADMIN = "📨 Розсилка афіші"
 
 START_TEXT = "Smachno In — смачно, швидко, твоє 🤍"
-
 LOYALTY_LINK = "https://loyal.ws/d/699f33dd647328c6f9249a9f/echopoolclub"
 
 
-# ================== GOOGLE SHEETS ==================
+# ================= GOOGLE =================
 def get_sheet():
     creds = json.loads(GOOGLE_CREDS_JSON)
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -82,7 +78,7 @@ def save_contact(user, phone):
     ])
 
 
-def get_all_user_ids():
+def get_all_users():
     ws = get_sheet()
     rows = ws.get_all_values()
 
@@ -90,18 +86,18 @@ def get_all_user_ids():
     for r in rows:
         if len(r) >= 6:
             try:
-                uid = int(r[5])
-                users.append(uid)
+                users.append(int(r[5]))
             except:
-                continue
+                pass
+
     return list(set(users))
 
 
 def user_exists(user_id):
-    return user_id in get_all_user_ids()
+    return user_id in get_all_users()
 
 
-# ================== KEYBOARDS ==================
+# ================= KEYBOARDS =================
 def kb_contact():
     return ReplyKeyboardMarkup(
         [[KeyboardButton(BTN_CONTACT, request_contact=True)]],
@@ -124,24 +120,24 @@ def inline_loyalty():
     ])
 
 
-# ================== HANDLERS ==================
+# ================= HANDLERS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
-    # адмін одразу в меню
+    await update.message.reply_text(START_TEXT)
+
+    # адмін
     if user.id == ADMIN_ID:
         await update.message.reply_text(
-            START_TEXT,
+            "Адмін панель",
             reply_markup=kb_main(user.id)
         )
         return
 
-    await update.message.reply_text(START_TEXT)
-
-    # якщо нема в таблиці — просимо контакт
+    # якщо нема в базі → форсимо контакт
     if not user_exists(user.id):
         await update.message.reply_text(
-            "Щоб продовжити — поділись контактом 👇",
+            "Щоб користуватись ботом — поділись контактом 👇",
             reply_markup=kb_contact()
         )
     else:
@@ -151,11 +147,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-async def contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    phone = update.message.contact.phone_number
+    contact = update.message.contact
 
-    save_contact(user, phone)
+    # захист (щоб не чужий номер)
+    if contact.user_id != user.id:
+        await update.message.reply_text(
+            "Надішли свій контакт через кнопку 👇",
+            reply_markup=kb_contact()
+        )
+        return
+
+    save_contact(user, contact.phone_number)
 
     await update.message.reply_text(
         "Дякуємо 🤍",
@@ -163,11 +167,11 @@ async def contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    msg = (update.message.text or "").strip()
+    msg = update.message.text
 
-    # ========= БЛОКУЄМО БЕЗ КОНТАКТУ =========
+    # ===== БЛОКУЄМО БЕЗ КОНТАКТУ =====
     if user.id != ADMIN_ID and not user_exists(user.id):
         await update.message.reply_text(
             "Спочатку поділись контактом 👇",
@@ -175,7 +179,7 @@ async def text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ========= АДМІН РОЗСИЛКА =========
+    # ===== АДМІН =====
     if msg == BTN_ADMIN and user.id == ADMIN_ID:
         context.user_data["step"] = "photo"
         await update.message.reply_text(
@@ -195,21 +199,18 @@ async def text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["photo"] = update.message.photo[-1].file_id
             context.user_data["step"] = "text"
 
-            await update.message.reply_text("Тепер надішли текст")
+            await update.message.reply_text("Тепер текст")
             return
 
         elif step == "text":
-            users = get_all_user_ids()
+            users = get_all_users()
             photo = context.user_data.get("photo")
-            caption = msg
-
-            await update.message.reply_text(f"Розсилка: {len(users)}")
 
             ok, fail = 0, 0
 
             for uid in users:
                 try:
-                    await context.bot.send_photo(uid, photo, caption=caption)
+                    await context.bot.send_photo(uid, photo, caption=msg)
                     ok += 1
                 except:
                     fail += 1
@@ -217,27 +218,27 @@ async def text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.clear()
 
             await update.message.reply_text(
-                f"Готово ✅\nOK: {ok}\nFail: {fail}",
+                f"Готово\nOK: {ok}\nFail: {fail}",
                 reply_markup=kb_main(user.id)
             )
             return
 
-    # ========= ЗВИЧАЙНИЙ КОРИСТУВАЧ =========
+    # ===== ЮЗЕР =====
     if msg == BTN_LOYALTY:
         await update.message.reply_text(
-            "Натисни кнопку нижче 👇",
+            "Натисни кнопку 👇",
             reply_markup=inline_loyalty()
         )
 
 
-# ================== MAIN ==================
+# ================= MAIN =================
 def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.CONTACT, contact))
-    app.add_handler(MessageHandler(filters.PHOTO, text))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text))
+    app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_text))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     app.run_polling()
 
