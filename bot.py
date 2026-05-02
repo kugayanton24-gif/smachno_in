@@ -32,11 +32,45 @@ ADMIN_ID = 890221392
 UA_TZ = ZoneInfo("Europe/Kyiv")
 
 
-# ================= TEXT =================
-START_TEXT = "Smachno In — смачно, швидко, твоє 🤍"
+# ================= BUTTONS =================
 BTN_CONTACT = "📲 Поділитися контактом"
 BTN_LOYALTY = "💳 Система лояльності"
+BTN_PLACES = "📍 Наші заклади"
 BTN_ADMIN = "📨 Розсилка афіші"
+
+
+# ================= TEXT =================
+START_TEXT = "Smachno In — смачно, швидко, твоє 🤍"
+
+TEXT_LOYALTY = (
+    "Ставайте частиною SMACHNO IN🤍\n\n"
+    "📍Після активації ви отримуєте:\n"
+    "— 3% кешбек з кожного чеку, який збільшується з кожним наступним візитом\n"
+    "— Персональні пропозиції\n"
+    "Карта лояльності автоматично додається в Apple Wallet або Google Pay — без додаткових застосунків.\n\n"
+    "Натисніть «Приєднатися», щоб активувати карту"
+)
+
+TEXT_PLACES = (
+    "Усі формати — в одному просторі.\n"
+    "Обирайте атмосферу під настрій!\n\n"
+    "🍸 Echo Lounge\n"
+    "• вул. Щирецька 36/15\n"
+    "• 12:00 – 23:00\n"
+    "Lounge-ресторан: кухня, бар, кальяни та події.\n\n"
+    "🎱 Pool Club Lounge\n"
+    "• вул. Щирецька 36/15\n"
+    "• 10:00 – 23:00\n"
+    "Більярд, бар і комфортна зона для відпочинку.\n\n"
+    "🏸 Squashfit Center\n"
+    "• вул. Щирецька 36/15\n"
+    "• 10:00 – 23:00\n"
+    "Сквош-корти та простір для активного відпочинку.\n\n"
+    "🥗 Smachno In\n"
+    "• ТВК «Південний» — Продуктовий ринок\n"
+    "• 10:00 – 19:00\n"
+    "Свіжі страви для швидкого обіду або перекусу 🤍"
+)
 
 LOYALTY_LINK = "https://loyal.ws/d/699f33dd647328c6f9249a9f/echopoolclub"
 
@@ -50,7 +84,7 @@ def get_sheet():
         gc = gspread.authorize(credentials)
         return gc.open_by_key(SHEET_ID).sheet1
     except Exception as e:
-        print("❌ GOOGLE CONNECT ERROR:", e)
+        print("❌ GOOGLE ERROR:", e)
         return None
 
 
@@ -58,7 +92,6 @@ def save_contact(user, phone):
     try:
         ws = get_sheet()
         if not ws:
-            print("❌ Sheet not found")
             return
 
         dt = datetime.now(UA_TZ).strftime("%d.%m.%Y %H:%M:%S")
@@ -111,7 +144,10 @@ def kb_contact():
 
 
 def kb_main(user_id):
-    kb = [[KeyboardButton(BTN_LOYALTY)]]
+    kb = [
+        [KeyboardButton(BTN_LOYALTY)],
+        [KeyboardButton(BTN_PLACES)],
+    ]
 
     if user_id == ADMIN_ID:
         kb.append([KeyboardButton(BTN_ADMIN)])
@@ -121,7 +157,7 @@ def kb_main(user_id):
 
 def inline_loyalty():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Перейти", url=LOYALTY_LINK)]
+        [InlineKeyboardButton("Приєднатися", url=LOYALTY_LINK)]
     ])
 
 
@@ -138,7 +174,6 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     contact = update.message.contact
 
-    # захист
     if contact.user_id != user.id:
         await update.message.reply_text(
             "Надішли свій контакт 👇",
@@ -146,10 +181,8 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # зберігаємо
     save_contact(user, contact.phone_number)
 
-    # ❗ ВАЖЛИВО — МЕНЮ ВИДАЄМО ЗАВЖДИ
     await update.message.reply_text(
         "Ти в системі 🤍",
         reply_markup=kb_main(user.id)
@@ -161,15 +194,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text
 
-    # ===== ЛОЯЛЬНІСТЬ =====
+    # Лояльність
     if text == BTN_LOYALTY:
         await update.message.reply_text(
-            "Натисни кнопку 👇",
+            TEXT_LOYALTY,
             reply_markup=inline_loyalty()
         )
         return
 
-    # ===== АДМІН =====
+    # Наші заклади
+    if text == BTN_PLACES:
+        await update.message.reply_text(TEXT_PLACES)
+        return
+
+    # ================= АДМІН =================
     if user.id == ADMIN_ID:
 
         if text == BTN_ADMIN:
@@ -189,7 +227,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             context.user_data["photo"] = update.message.photo[-1].file_id
             context.user_data["step"] = "text"
-
             await update.message.reply_text("Тепер текст")
             return
 
@@ -203,8 +240,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await context.bot.send_photo(uid, photo, caption=text)
                     ok += 1
-                except Exception as e:
-                    print("SEND ERROR:", e)
+                except:
                     fail += 1
 
             context.user_data.clear()
