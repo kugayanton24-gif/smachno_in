@@ -101,7 +101,8 @@ def user_exists(user_id):
 def kb_contact():
     return ReplyKeyboardMarkup(
         [[KeyboardButton(BTN_CONTACT, request_contact=True)]],
-        resize_keyboard=True
+        resize_keyboard=True,
+        one_time_keyboard=False  # 🔥 важливо
     )
 
 
@@ -124,25 +125,23 @@ def inline_loyalty():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
-    await update.message.reply_text(START_TEXT)
-
-    # адмін
+    # 👑 адмін
     if user.id == ADMIN_ID:
         await update.message.reply_text(
-            "Адмін панель",
+            START_TEXT,
             reply_markup=kb_main(user.id)
         )
         return
 
-    # якщо нема в базі → форсимо контакт
+    # ❗ якщо нема в базі → ОДРАЗУ кнопка
     if not user_exists(user.id):
         await update.message.reply_text(
-            "Щоб користуватись ботом — поділись контактом 👇",
+            START_TEXT + "\n\nЩоб продовжити — поділись контактом 👇",
             reply_markup=kb_contact()
         )
     else:
         await update.message.reply_text(
-            "Ти вже в системі 🤍",
+            START_TEXT,
             reply_markup=kb_main(user.id)
         )
 
@@ -151,7 +150,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     contact = update.message.contact
 
-    # захист (щоб не чужий номер)
+    # захист від чужого номера
     if contact.user_id != user.id:
         await update.message.reply_text(
             "Надішли свій контакт через кнопку 👇",
@@ -162,16 +161,16 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_contact(user, contact.phone_number)
 
     await update.message.reply_text(
-        "Дякуємо 🤍",
+        "Дякуємо 🤍 Ти вже в системі",
         reply_markup=kb_main(user.id)
     )
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    msg = update.message.text
+    msg = (update.message.text or "").strip()
 
-    # ===== БЛОКУЄМО БЕЗ КОНТАКТУ =====
+    # 🔒 блок без контакту
     if user.id != ADMIN_ID and not user_exists(user.id):
         await update.message.reply_text(
             "Спочатку поділись контактом 👇",
@@ -179,7 +178,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ===== АДМІН =====
+    # ================= АДМІН =================
     if msg == BTN_ADMIN and user.id == ADMIN_ID:
         context.user_data["step"] = "photo"
         await update.message.reply_text(
@@ -199,7 +198,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["photo"] = update.message.photo[-1].file_id
             context.user_data["step"] = "text"
 
-            await update.message.reply_text("Тепер текст")
+            await update.message.reply_text("Тепер надішли текст")
             return
 
         elif step == "text":
@@ -218,12 +217,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.clear()
 
             await update.message.reply_text(
-                f"Готово\nOK: {ok}\nFail: {fail}",
+                f"Готово ✅\nOK: {ok}\nFail: {fail}",
                 reply_markup=kb_main(user.id)
             )
             return
 
-    # ===== ЮЗЕР =====
+    # ================= ЮЗЕР =================
     if msg == BTN_LOYALTY:
         await update.message.reply_text(
             "Натисни кнопку 👇",
