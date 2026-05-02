@@ -33,41 +33,29 @@ UA_TZ = ZoneInfo("Europe/Kyiv")
 
 # ================== ADMIN ==================
 ADMIN_ID = 890221392
-BTN_ADMIN_BROADCAST = "📨 Розсилка афіші"
+BTN_ADMIN = "📨 Розсилка афіші"
 
 
-# ================== BUTTONS ==================
+# ================== UI ==================
+BTN_CONTACT = "📲 Поділитися контактом"
 BTN_LOYALTY = "💳 Система лояльності"
-BTN_SHARE_CONTACT = "📲 Поділитися контактом"
 
-
-# ================== LINK ==================
-LOYALTY_LINK = "https://loyal.ws/d/699f33dd647328c6f9249a9f/echopoolclub"
-
-
-# ================== TEXT ==================
 START_TEXT = "Smachno In — смачно, швидко, твоє 🤍"
 
-TEXT_LOYALTY = (
-    "Ставайте частиною програми лояльності Smachno In 🤍\n\n"
-    "— кешбек з кожного замовлення\n"
-    "— персональні пропозиції\n\n"
-    "Натисніть кнопку нижче ⬇️"
-)
+LOYALTY_LINK = "https://loyal.ws/d/699f33dd647328c6f9249a9f/echopoolclub"
 
 
 # ================== GOOGLE SHEETS ==================
 def get_sheet():
-    creds_dict = json.loads(GOOGLE_CREDS_JSON)
+    creds = json.loads(GOOGLE_CREDS_JSON)
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    gc = gspread.authorize(creds)
+    credentials = Credentials.from_service_account_info(creds, scopes=scopes)
+    gc = gspread.authorize(credentials)
     return gc.open_by_key(SHEET_ID).sheet1
 
 
 def ensure_header(ws):
-    values = ws.get_all_values()
-    if not values:
+    if not ws.get_all_values():
         ws.append_row([
             "datetime",
             "first_name",
@@ -88,57 +76,46 @@ def save_contact(user, phone):
         dt,
         user.first_name or "",
         user.last_name or "",
-        phone or "",
+        phone,
         user.username or "",
         str(user.id)
     ])
 
 
-# ================== USERS FROM SHEET ==================
 def get_all_user_ids():
     ws = get_sheet()
     rows = ws.get_all_values()
 
     users = []
-    seen = set()
-
     for r in rows:
-        if len(r) < 6:
-            continue
-
-        val = str(r[5]).strip()
-
-        if not val or val.lower() in ["user_id", "id"]:
-            continue
-
-        try:
-            uid = int(val)
-            if uid not in seen:
-                seen.add(uid)
+        if len(r) >= 6:
+            try:
+                uid = int(r[5])
                 users.append(uid)
-        except:
-            continue
+            except:
+                continue
+    return list(set(users))
 
-    return users
+
+def user_exists(user_id):
+    return user_id in get_all_user_ids()
 
 
 # ================== KEYBOARDS ==================
 def kb_contact():
     return ReplyKeyboardMarkup(
-        [[KeyboardButton(BTN_SHARE_CONTACT, request_contact=True)]],
+        [[KeyboardButton(BTN_CONTACT, request_contact=True)]],
         resize_keyboard=True
     )
 
 
 def kb_main(user_id):
-    keyboard = [
-        [KeyboardButton(BTN_LOYALTY)]
-    ]
+    kb = [[KeyboardButton(BTN_LOYALTY)]]
 
     if user_id == ADMIN_ID:
-        keyboard.append([KeyboardButton(BTN_ADMIN_BROADCAST)])
+        kb.append([KeyboardButton(BTN_ADMIN)])
 
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 
 def inline_loyalty():
@@ -151,21 +128,27 @@ def inline_loyalty():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
-    # адмін без контакту
+    # адмін одразу в меню
     if user.id == ADMIN_ID:
-        context.user_data["contact_saved"] = True
         await update.message.reply_text(
             START_TEXT,
             reply_markup=kb_main(user.id)
         )
         return
 
-    context.user_data["contact_saved"] = False
+    await update.message.reply_text(START_TEXT)
 
-    await update.message.reply_text(
-        START_TEXT,
-        reply_markup=kb_contact()
-    )
+    # якщо нема в таблиці — просимо контакт
+    if not user_exists(user.id):
+        await update.message.reply_text(
+            "Щоб продовжити — поділись контактом 👇",
+            reply_markup=kb_contact()
+        )
+    else:
+        await update.message.reply_text(
+            "Ти вже в системі 🤍",
+            reply_markup=kb_main(user.id)
+        )
 
 
 async def contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -173,7 +156,6 @@ async def contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = update.message.contact.phone_number
 
     save_contact(user, phone)
-    context.user_data["contact_saved"] = True
 
     await update.message.reply_text(
         "Дякуємо 🤍",
@@ -183,13 +165,21 @@ async def contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    msg = update.message.text
+    msg = (update.message.text or "").strip()
 
-    # ===== АДМІН РОЗСИЛКА =====
-    if msg == BTN_ADMIN_BROADCAST and user.id == ADMIN_ID:
+    # ========= БЛОКУЄМО БЕЗ КОНТАКТУ =========
+    if user.id != ADMIN_ID and not user_exists(user.id):
+        await update.message.reply_text(
+            "Спочатку поділись контактом 👇",
+            reply_markup=kb_contact()
+        )
+        return
+
+    # ========= АДМІН РОЗСИЛКА =========
+    if msg == BTN_ADMIN and user.id == ADMIN_ID:
         context.user_data["step"] = "photo"
         await update.message.reply_text(
-            "Надішли фото",
+            "Надішли фото афіші",
             reply_markup=ReplyKeyboardRemove()
         )
         return
@@ -204,14 +194,14 @@ async def text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             context.user_data["photo"] = update.message.photo[-1].file_id
             context.user_data["step"] = "text"
-            await update.message.reply_text("Тепер текст")
+
+            await update.message.reply_text("Тепер надішли текст")
             return
 
         elif step == "text":
+            users = get_all_user_ids()
             photo = context.user_data.get("photo")
             caption = msg
-
-            users = get_all_user_ids()
 
             await update.message.reply_text(f"Розсилка: {len(users)}")
 
@@ -227,25 +217,17 @@ async def text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.clear()
 
             await update.message.reply_text(
-                f"Готово\nOK: {ok}\nFail: {fail}",
+                f"Готово ✅\nOK: {ok}\nFail: {fail}",
                 reply_markup=kb_main(user.id)
             )
             return
 
-    # ===== ЗВИЧАЙНИЙ ЮЗЕР =====
-    if not context.user_data.get("contact_saved"):
-        await update.message.reply_text(
-            "Поділись контактом 👇",
-            reply_markup=kb_contact()
-        )
-        return
-
+    # ========= ЗВИЧАЙНИЙ КОРИСТУВАЧ =========
     if msg == BTN_LOYALTY:
         await update.message.reply_text(
-            TEXT_LOYALTY,
+            "Натисни кнопку нижче 👇",
             reply_markup=inline_loyalty()
         )
-        return
 
 
 # ================== MAIN ==================
@@ -254,7 +236,8 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.CONTACT, contact))
-    app.add_handler(MessageHandler(filters.ALL, text))
+    app.add_handler(MessageHandler(filters.PHOTO, text))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text))
 
     app.run_polling()
 
