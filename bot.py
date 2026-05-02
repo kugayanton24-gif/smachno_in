@@ -72,7 +72,7 @@ TEXT_PLACES = (
     "Свіжі страви для швидкого обіду або перекусу 🤍"
 )
 
-LOYALTY_LINK = "https://loyal.ws/d/699f33dd647328c6f9249a9f/echopoolclub"
+LOYALTY_LINK = "https://loyal.ws/d/68ef90f8647328c6f923d25a/smachnoinn"
 
 
 # ================= GOOGLE =================
