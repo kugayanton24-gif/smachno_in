@@ -43,41 +43,62 @@ LOYALTY_LINK = "https://loyal.ws/d/699f33dd647328c6f9249a9f/echopoolclub"
 
 # ================= GOOGLE =================
 def get_sheet():
-    creds = json.loads(GOOGLE_CREDS_JSON)
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    credentials = Credentials.from_service_account_info(creds, scopes=scopes)
-    gc = gspread.authorize(credentials)
-    return gc.open_by_key(SHEET_ID).sheet1
+    try:
+        creds = json.loads(GOOGLE_CREDS_JSON)
+        scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+        credentials = Credentials.from_service_account_info(creds, scopes=scopes)
+        gc = gspread.authorize(credentials)
+        return gc.open_by_key(SHEET_ID).sheet1
+    except Exception as e:
+        print("❌ GOOGLE CONNECT ERROR:", e)
+        return None
 
 
 def save_contact(user, phone):
-    ws = get_sheet()
+    try:
+        ws = get_sheet()
+        if not ws:
+            print("❌ Sheet not found")
+            return
 
-    dt = datetime.now(UA_TZ).strftime("%d.%m.%Y %H:%M:%S")
+        dt = datetime.now(UA_TZ).strftime("%d.%m.%Y %H:%M:%S")
 
-    ws.append_row([
-        dt,
-        user.first_name or "",
-        user.last_name or "",
-        phone,
-        user.username or "",
-        str(user.id)
-    ])
+        ws.append_row([
+            dt,
+            user.first_name or "",
+            user.last_name or "",
+            phone or "",
+            user.username or "",
+            str(user.id)
+        ])
+
+        print("✅ SAVED:", user.id)
+
+    except Exception as e:
+        print("❌ SAVE ERROR:", e)
 
 
 def get_users():
-    ws = get_sheet()
-    rows = ws.get_all_values()
+    try:
+        ws = get_sheet()
+        if not ws:
+            return []
 
-    ids = []
-    for r in rows:
-        if len(r) >= 6:
-            try:
-                ids.append(int(r[5]))
-            except:
-                pass
+        rows = ws.get_all_values()
 
-    return list(set(ids))
+        ids = []
+        for r in rows:
+            if len(r) >= 6:
+                try:
+                    ids.append(int(r[5]))
+                except:
+                    pass
+
+        return list(set(ids))
+
+    except Exception as e:
+        print("❌ READ ERROR:", e)
+        return []
 
 
 # ================= KEYBOARDS =================
@@ -106,11 +127,8 @@ def inline_loyalty():
 
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-
-    # ❗ ГОЛОВНЕ — КНОПКА В ОДНОМУ ПОВІДОМЛЕННІ
     await update.message.reply_text(
-        START_TEXT + "\n\nНатисни кнопку нижче 👇",
+        START_TEXT + "\n\nПоділись контактом 👇",
         reply_markup=kb_contact()
     )
 
@@ -128,10 +146,12 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # зберігаємо
     save_contact(user, contact.phone_number)
 
+    # ❗ ВАЖЛИВО — МЕНЮ ВИДАЄМО ЗАВЖДИ
     await update.message.reply_text(
-        "Готово 🤍",
+        "Ти в системі 🤍",
         reply_markup=kb_main(user.id)
     )
 
@@ -152,18 +172,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ===== АДМІН =====
     if user.id == ADMIN_ID:
 
-        # старт розсилки
         if text == BTN_ADMIN:
             context.user_data["step"] = "photo"
             await update.message.reply_text(
-                "Надішли фото",
+                "Надішли фото афіші",
                 reply_markup=ReplyKeyboardRemove()
             )
             return
 
         step = context.user_data.get("step")
 
-        # фото
         if step == "photo":
             if not update.message.photo:
                 await update.message.reply_text("Потрібно фото")
@@ -171,10 +189,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             context.user_data["photo"] = update.message.photo[-1].file_id
             context.user_data["step"] = "text"
+
             await update.message.reply_text("Тепер текст")
             return
 
-        # текст → розсилка
         if step == "text":
             users = get_users()
             photo = context.user_data.get("photo")
@@ -185,7 +203,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await context.bot.send_photo(uid, photo, caption=text)
                     ok += 1
-                except:
+                except Exception as e:
+                    print("SEND ERROR:", e)
                     fail += 1
 
             context.user_data.clear()
